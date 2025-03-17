@@ -65,7 +65,7 @@ void metal_matmul(uint N, uint M, uint K, const std::string& method,
 
         size_t a_bytes = N*K*sizeof(float);
         size_t b_bytes = M*K*sizeof(float);
-        size_t c_bytes = N*N*sizeof(float);
+        size_t c_bytes = N*M*sizeof(float);
 
         id<MTLBuffer> bufferParam = [device newBufferWithBytes:&param length:sizeof(param) options:MTLResourceStorageModeShared];
         id<MTLBuffer> bufferA = [device newBufferWithBytes:A.get() length:a_bytes options:MTLResourceStorageModeShared];
@@ -78,9 +78,9 @@ void metal_matmul(uint N, uint M, uint K, const std::string& method,
             id<MTLCommandBuffer> commandBuffer = [commandQueue commandBuffer];
 
             if (method == "mps") {
-                MPSMatrixDescriptor *descA = [MPSMatrixDescriptor matrixDescriptorWithRows:N columns:K rowBytes:a_bytes dataType:MPSDataTypeFloat32];
-                MPSMatrixDescriptor *descB = [MPSMatrixDescriptor matrixDescriptorWithRows:K columns:M rowBytes:b_bytes dataType:MPSDataTypeFloat32];
-                MPSMatrixDescriptor *descC = [MPSMatrixDescriptor matrixDescriptorWithRows:N columns:M rowBytes:c_bytes dataType:MPSDataTypeFloat32];
+                MPSMatrixDescriptor *descA = [MPSMatrixDescriptor matrixDescriptorWithRows:N columns:K rowBytes:N*sizeof(float) dataType:MPSDataTypeFloat32];
+                MPSMatrixDescriptor *descB = [MPSMatrixDescriptor matrixDescriptorWithRows:K columns:M rowBytes:M*sizeof(float) dataType:MPSDataTypeFloat32];
+                MPSMatrixDescriptor *descC = [MPSMatrixDescriptor matrixDescriptorWithRows:N columns:M rowBytes:N*sizeof(float) dataType:MPSDataTypeFloat32];
                 MPSMatrix *matrixA = [[MPSMatrix alloc] initWithBuffer:bufferA descriptor:descA];
                 MPSMatrix *matrixB = [[MPSMatrix alloc] initWithBuffer:bufferB descriptor:descB];
                 MPSMatrix *matrixC = [[MPSMatrix alloc] initWithBuffer:bufferC descriptor:descC];
@@ -141,7 +141,7 @@ void metal_matmul(uint N, uint M, uint K, const std::string& method,
 
 
 int main() {
-    std::string method = "naive";
+    std::string method = "mps";
     metal_matmul(256, 256, 256, method, 1000, {16, 16}, false);
     metal_matmul(1024, 1024, 1024, method, 100, {16, 16}, false);
     metal_matmul(4096, 4096, 4096, method, 10, {16, 16}, false);
