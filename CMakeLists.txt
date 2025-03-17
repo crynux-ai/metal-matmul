@@ -9,6 +9,7 @@ set(CMAKE_OSX_DEPLOYMENT_TARGET "10.15")
 find_library(METAL_FRAMEWORK Metal REQUIRED)
 find_library(FOUNDATION_FRAMEWORK Foundation REQUIRED)
 find_library(QUARTZCORE_FRAMEWORK QuartzCore REQUIRED)
+find_library(MPS_FRAMEWORK MetalPerformanceShaders REQUIRED)
 
 # Build metal
 file(GLOB METAL_SHADER_FILES "metal/*.metal")
@@ -45,5 +46,6 @@ target_link_libraries(
     ${METAL_FRAMEWORK}
     ${FOUNDATION_FRAMEWORK}
     ${QUARTZCORE_FRAMEWORK}
+    ${MPS_FRAMEWORK}
 )
 add_dependencies(benchmark metallib)
