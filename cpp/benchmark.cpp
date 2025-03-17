@@ -142,8 +142,8 @@ void metal_matmul(uint N, uint M, uint K, const std::string& method,
 
 int main() {
     std::string method = "naive";
-    metal_matmul(256, 256, 256, method, 1000, {1, 1}, false);
-    metal_matmul(1024, 1024, 1024, method, 100, {1, 1}, false);
-    metal_matmul(4096, 4096, 4096, method, 10, {1, 1}, false);
-    metal_matmul(8192, 8192, 8192, method, 3, {1, 1}, false);
+    metal_matmul(256, 256, 256, method, 1000, {16, 16}, false);
+    metal_matmul(1024, 1024, 1024, method, 100, {16, 16}, false);
+    metal_matmul(4096, 4096, 4096, method, 10, {16, 16}, false);
+    metal_matmul(8192, 8192, 8192, method, 3, {16, 16}, false);
 }
