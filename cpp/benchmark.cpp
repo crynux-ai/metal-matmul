@@ -15,6 +15,55 @@ struct RunParams {
     uint K;
 };
 
+void mps(id<MTLCommandBuffer> commandBuffer, id<MTLDevice> device,
+         id<MTLBuffer> bufferA, id<MTLBuffer> bufferB, id<MTLBuffer> bufferC,
+         uint N, uint M, uint K) {
+    MPSMatrixDescriptor *descA = [MPSMatrixDescriptor matrixDescriptorWithRows:N columns:K rowBytes:N*sizeof(float) dataType:MPSDataTypeFloat32];
+    MPSMatrixDescriptor *descB = [MPSMatrixDescriptor matrixDescriptorWithRows:K columns:M rowBytes:M*sizeof(float) dataType:MPSDataTypeFloat32];
+    MPSMatrixDescriptor *descC = [MPSMatrixDescriptor matrixDescriptorWithRows:N columns:M rowBytes:N*sizeof(float) dataType:MPSDataTypeFloat32];
+    MPSMatrix *matrixA = [[MPSMatrix alloc] initWithBuffer:bufferA descriptor:descA];
+    MPSMatrix *matrixB = [[MPSMatrix alloc] initWithBuffer:bufferB descriptor:descB];
+    MPSMatrix *matrixC = [[MPSMatrix alloc] initWithBuffer:bufferC descriptor:descC];
+    MPSMatrixMultiplication *matmul = [[MPSMatrixMultiplication alloc] initWithDevice:device
+        transposeLeft:NO transposeRight:NO resultRows:N resultColumns:M interiorColumns:K
+        alpha:1.0 beta:0.0];
+    MPSCommandBuffer *mpsCommandBuffer = [[MPSCommandBuffer alloc] initWithCommandBuffer:commandBuffer];
+    [matmul encodeToCommandBuffer:mpsCommandBuffer leftMatrix:matrixA rightMatrix:matrixB resultMatrix:matrixC];
+}
+
+void naive(id<MTLCommandBuffer> commandBuffer, id<MTLComputePipelineState> state,
+           id<MTLBuffer> bufferParam, id<MTLBuffer> bufferA, id<MTLBuffer> bufferB, id<MTLBuffer> bufferC,
+           uint N, uint M, uint K, const std::array<int, 2>& threads_per_group) {
+    id<MTLComputeCommandEncoder> computeEncoder = [commandBuffer computeCommandEncoder];
+    [computeEncoder setComputePipelineState:state];
+    [computeEncoder setBuffer:bufferParam offset:0 atIndex:0];
+    [computeEncoder setBuffer:bufferA offset:0 atIndex:1];
+    [computeEncoder setBuffer:bufferB offset:0 atIndex:2];
+    [computeEncoder setBuffer:bufferC offset:0 atIndex:3];
+    MTLSize gridSize = MTLSizeMake(N, M, 1);
+    MTLSize threadgroupSize = MTLSizeMake(threads_per_group[0], threads_per_group[1], 1);
+    [computeEncoder dispatchThreads:gridSize threadsPerThreadgroup:threadgroupSize];
+    [computeEncoder endEncoding];
+}
+
+void shared_mem(
+        id<MTLCommandBuffer> commandBuffer, id<MTLComputePipelineState> state,
+        id<MTLBuffer> bufferParam, id<MTLBuffer> bufferA, id<MTLBuffer> bufferB, id<MTLBuffer> bufferC,
+        uint N, uint M, uint K, const std::array<int, 2>& threads_per_group) {
+    id<MTLComputeCommandEncoder> computeEncoder = [commandBuffer computeCommandEncoder];
+    [computeEncoder setThreadgroupMemoryLength:8192 atIndex:0];
+    [computeEncoder setComputePipelineState:state];
+    [computeEncoder setBuffer:bufferParam offset:0 atIndex:0];
+    [computeEncoder setBuffer:bufferA offset:0 atIndex:1];
+    [computeEncoder setBuffer:bufferB offset:0 atIndex:2];
+    [computeEncoder setBuffer:bufferC offset:0 atIndex:3];
+    MTLSize gridSize = MTLSizeMake(N, M, 1);
+    MTLSize threadgroupSize = MTLSizeMake(threads_per_group[0], threads_per_group[1], 1);
+    [computeEncoder dispatchThreads:gridSize threadsPerThreadgroup:threadgroupSize];
+    [computeEncoder endEncoding];
+}
+
+
 void metal_matmul(uint N, uint M, uint K, const std::string& method,
         int repeat=1,
         const std::array<int, 2>& threads_per_group={1, 1},
@@ -26,6 +75,12 @@ void metal_matmul(uint N, uint M, uint K, const std::string& method,
         if (!device) {
             throw std::runtime_error("Metal is not supported");
         }
+        printf("Device info:\n\tMax threadgroup memory: %ld\n\tMax thread per group: %d, %d, %d\n",
+            long(device.maxThreadgroupMemoryLength),
+            int(device.maxThreadsPerThreadgroup.width),
+            int(device.maxThreadsPerThreadgroup.height),
+            int(device.maxThreadsPerThreadgroup.depth));
+
         id<MTLCommandQueue> commandQueue = [device newCommandQueue];
 
         id<MTLComputePipelineState> state;
@@ -77,29 +132,13 @@ void metal_matmul(uint N, uint M, uint K, const std::string& method,
         for (int i = 0; i < repeat; i++) {
             id<MTLCommandBuffer> commandBuffer = [commandQueue commandBuffer];
 
+
             if (method == "mps") {
-                MPSMatrixDescriptor *descA = [MPSMatrixDescriptor matrixDescriptorWithRows:N columns:K rowBytes:N*sizeof(float) dataType:MPSDataTypeFloat32];
-                MPSMatrixDescriptor *descB = [MPSMatrixDescriptor matrixDescriptorWithRows:K columns:M rowBytes:M*sizeof(float) dataType:MPSDataTypeFloat32];
-                MPSMatrixDescriptor *descC = [MPSMatrixDescriptor matrixDescriptorWithRows:N columns:M rowBytes:N*sizeof(float) dataType:MPSDataTypeFloat32];
-                MPSMatrix *matrixA = [[MPSMatrix alloc] initWithBuffer:bufferA descriptor:descA];
-                MPSMatrix *matrixB = [[MPSMatrix alloc] initWithBuffer:bufferB descriptor:descB];
-                MPSMatrix *matrixC = [[MPSMatrix alloc] initWithBuffer:bufferC descriptor:descC];
-                MPSMatrixMultiplication *matmul = [[MPSMatrixMultiplication alloc] initWithDevice:device
-                    transposeLeft:NO transposeRight:NO resultRows:N resultColumns:M interiorColumns:K
-                    alpha:1.0 beta:0.0];
-                MPSCommandBuffer *mpsCommandBuffer = [[MPSCommandBuffer alloc] initWithCommandBuffer:commandBuffer];
-                [matmul encodeToCommandBuffer:mpsCommandBuffer leftMatrix:matrixA rightMatrix:matrixB resultMatrix:matrixC];
-            } else {
-                id<MTLComputeCommandEncoder> computeEncoder = [commandBuffer computeCommandEncoder];
-                [computeEncoder setComputePipelineState:state];
-                [computeEncoder setBuffer:bufferParam offset:0 atIndex:0];
-                [computeEncoder setBuffer:bufferA offset:0 atIndex:1];
-                [computeEncoder setBuffer:bufferB offset:0 atIndex:2];
-                [computeEncoder setBuffer:bufferC offset:0 atIndex:3];
-                MTLSize gridSize = MTLSizeMake(N, M, 1);
-                MTLSize threadgroupSize = MTLSizeMake(threads_per_group[0], threads_per_group[1], 1);
-                [computeEncoder dispatchThreads:gridSize threadsPerThreadgroup:threadgroupSize];
-                [computeEncoder endEncoding];
+                mps(commandBuffer, device, bufferA, bufferB, bufferC, N, M, K);
+            } else if (method == "naive") {
+                naive(commandBuffer, state, bufferParam, bufferA, bufferB, bufferC, N, M, K, threads_per_group);
+            } else if (method == "shared_mem") {
+                shared_mem(commandBuffer, state, bufferParam, bufferA, bufferB, bufferC, N, M, K, threads_per_group);
             }
 
             [commandBuffer commit];
@@ -131,7 +170,7 @@ void metal_matmul(uint N, uint M, uint K, const std::string& method,
                 if (fabs(val - C[i * M + j]) < 1e-5) {
                     cnt++;
                 } else {
-                    printf("Mistmatch: %f - %f\n", val, C[i*M+j]);
+                  //  printf("Mistmatch: %f - %f\n", val, C[i*M+j]);
                 }
             }
         }
@@ -141,9 +180,9 @@ void metal_matmul(uint N, uint M, uint K, const std::string& method,
 
 
 int main() {
-    std::string method = "mps";
-    metal_matmul(256, 256, 256, method, 1000, {16, 16}, false);
-    metal_matmul(1024, 1024, 1024, method, 100, {16, 16}, false);
+    std::string method = "shared_mem";
+    metal_matmul(256, 256, 256, method, 1000, {16, 16}, true);
+    metal_matmul(1024, 1024, 1024, method, 100, {16, 16}, true);
     metal_matmul(4096, 4096, 4096, method, 10, {16, 16}, false);
     metal_matmul(8192, 8192, 8192, method, 3, {16, 16}, false);
 }
