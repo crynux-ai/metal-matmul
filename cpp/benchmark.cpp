@@ -94,7 +94,7 @@ void block_tiling(
     [computeEncoder setBuffer:bufferA offset:0 atIndex:1];
     [computeEncoder setBuffer:bufferB offset:0 atIndex:2];
     [computeEncoder setBuffer:bufferC offset:0 atIndex:3];
-    MTLSize gridSize = MTLSizeMake(param.N , param.M, 1);
+    MTLSize gridSize = MTLSizeMake(param.N / param.BLOCK_N, param.M / param.BLOCK_M, 1);
     MTLSize threadgroupSize = MTLSizeMake(threads_per_group[0], threads_per_group[1], 1);
     [computeEncoder dispatchThreads:gridSize threadsPerThreadgroup:threadgroupSize];
     [computeEncoder endEncoding];
@@ -159,7 +159,7 @@ void metal_matmul(uint N, uint M, uint K, const std::string& method,
             } else if (method == "shared_mem") {
                 shared_mem(commandBuffer, func_state(device, "shared_mem_4"), bufferParam, bufferA, bufferB, bufferC, param, threads_per_group);
             } else if (method == "block_tiling") {
-                shared_mem(commandBuffer, func_state(device, "block_tiling"), bufferParam, bufferA, bufferB, bufferC, param, threads_per_group);
+                block_tiling(commandBuffer, func_state(device, "block_tiling"), bufferParam, bufferA, bufferB, bufferC, param, threads_per_group);
             }
 
             [commandBuffer commit];
@@ -205,7 +205,7 @@ void metal_matmul(uint N, uint M, uint K, const std::string& method,
 
 
 int main() {
-    std::string method = "shared_mem";
+    std::string method = "block_tiling";
     metal_matmul(256, 256, 256, method, 1000, {16, 16}, true);
     metal_matmul(1024, 1024, 1024, method, 100, {16, 16}, true);
     metal_matmul(4096, 4096, 4096, method, 10, {16, 16}, false);
