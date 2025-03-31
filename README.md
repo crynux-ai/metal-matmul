@@ -27,6 +27,7 @@ Performance (GFlops)
 |global mem       |    102      |       93      |        90     |       79      |  |
 |threadgroup mem  |     81      |      391      |       421     |      422      | thread group 16x16 |
 |block tiling     |     35      |      227      |       253     |      217      | thread group 16x16, block_k 16, block_n/m 4 |
+|tg mem unroll    |     96      |      786      |       900     |      906      | unroll 4 |
 
 ## Acknowledge
 

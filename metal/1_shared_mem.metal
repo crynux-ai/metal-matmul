@@ -3,6 +3,7 @@
 
 using namespace metal;
 
+template<ushort BLOCK_K>
 kernel void shared_mem(
     constant RunParams *param  [[ buffer(0) ]],
     const device float *A      [[ buffer(1) ]],     // [N, K]
@@ -21,6 +22,7 @@ kernel void shared_mem(
     threadgroup float* b_cache = shmem + tdim.x * tdim.y;
     float val = 0;
     
+    #pragma unroll(BLOCK_K)
     for (uint i = 0; i < param->K; i+=tdim.y, a_ptr+=tdim.y, b_ptr+=tdim.x) {
         // Assume tdim.x == tdim.y == tile_width
         a_cache[tpitg.x * tdim.y + tpitg.y] = A[a_ptr + tpitg.y];
@@ -29,6 +31,7 @@ kernel void shared_mem(
 
         uint ac_ptr = tpitg.x * tdim.y;
         uint bc_ptr = tpitg.y * tdim.x;
+        #pragma unroll(BLOCK_K)
         for (uint z = 0; z < tdim.y; z++, ac_ptr++, bc_ptr++) {
             val += a_cache[ac_ptr] * b_cache[bc_ptr];
         }
@@ -37,3 +40,11 @@ kernel void shared_mem(
     uint ptr = thread_idx.x * param->M + thread_idx.y;
     output[ptr] = val;
 }
+
+typedef decltype(shared_mem<1>) shared_mem_fn;
+
+template [[host_name("shared_mem_4")]] kernel shared_mem_fn shared_mem<4>;
+template [[host_name("shared_mem_8")]] kernel shared_mem_fn shared_mem<8>;
+template [[host_name("shared_mem_16")]] kernel shared_mem_fn shared_mem<16>;
+template [[host_name("shared_mem_32")]] kernel shared_mem_fn shared_mem<32>;
+template [[host_name("shared_mem_64")]] kernel shared_mem_fn shared_mem<64>;

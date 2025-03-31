@@ -157,7 +157,7 @@ void metal_matmul(uint N, uint M, uint K, const std::string& method,
             } else if (method == "naive") {
                 naive(commandBuffer, func_state(device, "naive"), bufferParam, bufferA, bufferB, bufferC, param, threads_per_group);
             } else if (method == "shared_mem") {
-                shared_mem(commandBuffer, func_state(device, "shared_mem"), bufferParam, bufferA, bufferB, bufferC, param, threads_per_group);
+                shared_mem(commandBuffer, func_state(device, "shared_mem_4"), bufferParam, bufferA, bufferB, bufferC, param, threads_per_group);
             } else if (method == "block_tiling") {
                 shared_mem(commandBuffer, func_state(device, "block_tiling"), bufferParam, bufferA, bufferB, bufferC, param, threads_per_group);
             }
