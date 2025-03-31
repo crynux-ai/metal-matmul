@@ -13,7 +13,27 @@ struct RunParams {
     uint N;
     uint M;
     uint K;
+    uint BLOCK_N;
+    uint BLOCK_M;
 };
+
+id<MTLComputePipelineState> func_state(id<MTLDevice> device, const std::string& name) {
+    NSError* error;
+    NSString *libPath = [[NSBundle mainBundle] pathForResource:@"matmul" ofType:@"metallib"];
+    id<MTLLibrary> library = [device newLibraryWithFile:libPath error:&error];
+    if (!library) {
+        throw std::runtime_error("Fail to load library");
+    }
+    id<MTLFunction> kernelFunction = [library newFunctionWithName:[NSString stringWithUTF8String:name.c_str()]];
+    if (!kernelFunction) {
+        throw std::runtime_error("Method not found in the library");
+    }
+    id<MTLComputePipelineState> state = [device newComputePipelineStateWithFunction:kernelFunction error:&error];
+    if (!state) {
+        throw std::runtime_error("Fail to create pipeline");
+    }
+    return state;
+}
 
 void mps(id<MTLCommandBuffer> commandBuffer, id<MTLDevice> device,
          id<MTLBuffer> bufferA, id<MTLBuffer> bufferB, id<MTLBuffer> bufferC,
@@ -33,14 +53,14 @@ void mps(id<MTLCommandBuffer> commandBuffer, id<MTLDevice> device,
 
 void naive(id<MTLCommandBuffer> commandBuffer, id<MTLComputePipelineState> state,
            id<MTLBuffer> bufferParam, id<MTLBuffer> bufferA, id<MTLBuffer> bufferB, id<MTLBuffer> bufferC,
-           uint N, uint M, uint K, const std::array<int, 2>& threads_per_group) {
+           const RunParams& param, const std::array<int, 2>& threads_per_group) {
     id<MTLComputeCommandEncoder> computeEncoder = [commandBuffer computeCommandEncoder];
     [computeEncoder setComputePipelineState:state];
     [computeEncoder setBuffer:bufferParam offset:0 atIndex:0];
     [computeEncoder setBuffer:bufferA offset:0 atIndex:1];
     [computeEncoder setBuffer:bufferB offset:0 atIndex:2];
     [computeEncoder setBuffer:bufferC offset:0 atIndex:3];
-    MTLSize gridSize = MTLSizeMake(N, M, 1);
+    MTLSize gridSize = MTLSizeMake(param.N, param.M, 1);
     MTLSize threadgroupSize = MTLSizeMake(threads_per_group[0], threads_per_group[1], 1);
     [computeEncoder dispatchThreads:gridSize threadsPerThreadgroup:threadgroupSize];
     [computeEncoder endEncoding];
@@ -49,7 +69,7 @@ void naive(id<MTLCommandBuffer> commandBuffer, id<MTLComputePipelineState> state
 void shared_mem(
         id<MTLCommandBuffer> commandBuffer, id<MTLComputePipelineState> state,
         id<MTLBuffer> bufferParam, id<MTLBuffer> bufferA, id<MTLBuffer> bufferB, id<MTLBuffer> bufferC,
-        uint N, uint M, uint K, const std::array<int, 2>& threads_per_group) {
+        const RunParams& param, const std::array<int, 2>& threads_per_group) {
     id<MTLComputeCommandEncoder> computeEncoder = [commandBuffer computeCommandEncoder];
     [computeEncoder setThreadgroupMemoryLength:8192 atIndex:0];
     [computeEncoder setComputePipelineState:state];
@@ -57,7 +77,24 @@ void shared_mem(
     [computeEncoder setBuffer:bufferA offset:0 atIndex:1];
     [computeEncoder setBuffer:bufferB offset:0 atIndex:2];
     [computeEncoder setBuffer:bufferC offset:0 atIndex:3];
-    MTLSize gridSize = MTLSizeMake(N, M, 1);
+    MTLSize gridSize = MTLSizeMake(param.N / param.BLOCK_N, param.M / param.BLOCK_M, 1);
+    MTLSize threadgroupSize = MTLSizeMake(threads_per_group[0], threads_per_group[1], 1);
+    [computeEncoder dispatchThreads:gridSize threadsPerThreadgroup:threadgroupSize];
+    [computeEncoder endEncoding];
+}
+
+void block_tiling(
+        id<MTLCommandBuffer> commandBuffer, id<MTLComputePipelineState> state,
+        id<MTLBuffer> bufferParam, id<MTLBuffer> bufferA, id<MTLBuffer> bufferB, id<MTLBuffer> bufferC,
+        const RunParams& param, const std::array<int, 2>& threads_per_group) {
+    id<MTLComputeCommandEncoder> computeEncoder = [commandBuffer computeCommandEncoder];
+    [computeEncoder setThreadgroupMemoryLength:8192 atIndex:0];
+    [computeEncoder setComputePipelineState:state];
+    [computeEncoder setBuffer:bufferParam offset:0 atIndex:0];
+    [computeEncoder setBuffer:bufferA offset:0 atIndex:1];
+    [computeEncoder setBuffer:bufferB offset:0 atIndex:2];
+    [computeEncoder setBuffer:bufferC offset:0 atIndex:3];
+    MTLSize gridSize = MTLSizeMake(param.N , param.M, 1);
     MTLSize threadgroupSize = MTLSizeMake(threads_per_group[0], threads_per_group[1], 1);
     [computeEncoder dispatchThreads:gridSize threadsPerThreadgroup:threadgroupSize];
     [computeEncoder endEncoding];
@@ -82,30 +119,12 @@ void metal_matmul(uint N, uint M, uint K, const std::string& method,
             int(device.maxThreadsPerThreadgroup.depth));
 
         id<MTLCommandQueue> commandQueue = [device newCommandQueue];
-
-        id<MTLComputePipelineState> state;
-        if (method != "mps") {
-            NSString *libPath = [[NSBundle mainBundle] pathForResource:@"matmul" ofType:@"metallib"];
-            id<MTLLibrary> library = [device newLibraryWithFile:libPath error:&error];
-            if (!library) {
-                throw std::runtime_error("Fail to load library");
-            }
-
-            id<MTLFunction> kernelFunction = [library newFunctionWithName:[NSString stringWithUTF8String:method.c_str()]];
-            if (!kernelFunction) {
-                throw std::runtime_error("Method not found in the library");
-            }
-
-            state = [device newComputePipelineStateWithFunction:kernelFunction error:&error];
-            if (!state) {
-                throw std::runtime_error("Fail to create pipeline");
-            }
-        }
-
         RunParams param = {
             .N = N,
             .M = M,
             .K = K,
+            .BLOCK_M = 4,
+            .BLOCK_N = 4,
         };
 
         std::random_device rd;
@@ -136,9 +155,11 @@ void metal_matmul(uint N, uint M, uint K, const std::string& method,
             if (method == "mps") {
                 mps(commandBuffer, device, bufferA, bufferB, bufferC, N, M, K);
             } else if (method == "naive") {
-                naive(commandBuffer, state, bufferParam, bufferA, bufferB, bufferC, N, M, K, threads_per_group);
+                naive(commandBuffer, func_state(device, "naive"), bufferParam, bufferA, bufferB, bufferC, param, threads_per_group);
             } else if (method == "shared_mem") {
-                shared_mem(commandBuffer, state, bufferParam, bufferA, bufferB, bufferC, N, M, K, threads_per_group);
+                shared_mem(commandBuffer, func_state(device, "shared_mem"), bufferParam, bufferA, bufferB, bufferC, param, threads_per_group);
+            } else if (method == "block_tiling") {
+                shared_mem(commandBuffer, func_state(device, "block_tiling"), bufferParam, bufferA, bufferB, bufferC, param, threads_per_group);
             }
 
             [commandBuffer commit];
@@ -158,7 +179,8 @@ void metal_matmul(uint N, uint M, uint K, const std::string& method,
         float* ptrc = static_cast<float*>(bufferC.contents);
         memcpy(C.get(), ptrc, N * M * sizeof(float));
 
-        int cnt = 0;
+        int correct = 0;
+        int wrong = 0;
         for (int i = 0; i < N; i++) {
             for (int j = 0; j < M; j++) {
                 float val = 0;
@@ -168,19 +190,22 @@ void metal_matmul(uint N, uint M, uint K, const std::string& method,
                     val += A[aptr] * B[bptr];
                 }
                 if (fabs(val - C[i * M + j]) < 1e-5) {
-                    cnt++;
+                    correct++;
                 } else {
-                  //  printf("Mistmatch: %f - %f\n", val, C[i*M+j]);
+                    wrong++;
+                    if (wrong == 0) {
+                        printf("Mistmatch[%d,%d]: %f - %f\n", i, j, val, C[i*M+j]);
+                    }
                 }
             }
         }
-        printf("%d/%d match\n", cnt, N * M);
+        printf("%d/%d match\n", correct, N * M);
     }
 }
 
 
 int main() {
-    std::string method = "shared_mem";
+    std::string method = "block_tiling";
     metal_matmul(256, 256, 256, method, 1000, {16, 16}, true);
     metal_matmul(1024, 1024, 1024, method, 100, {16, 16}, true);
     metal_matmul(4096, 4096, 4096, method, 10, {16, 16}, false);
