@@ -71,7 +71,7 @@ void shared_mem(
         id<MTLBuffer> bufferParam, id<MTLBuffer> bufferA, id<MTLBuffer> bufferB, id<MTLBuffer> bufferC,
         const RunParams& param, const std::array<int, 2>& threads_per_group) {
     id<MTLComputeCommandEncoder> computeEncoder = [commandBuffer computeCommandEncoder];
-    [computeEncoder setThreadgroupMemoryLength:8192 atIndex:0];
+    [computeEncoder setThreadgroupMemoryLength:threads_per_group[0]*threads_per_group[1]*8 atIndex:0];
     [computeEncoder setComputePipelineState:state];
     [computeEncoder setBuffer:bufferParam offset:0 atIndex:0];
     [computeEncoder setBuffer:bufferA offset:0 atIndex:1];
@@ -123,8 +123,8 @@ void metal_matmul(uint N, uint M, uint K, const std::string& method,
             .N = N,
             .M = M,
             .K = K,
-            .BLOCK_M = 4,
-            .BLOCK_N = 4,
+            .BLOCK_M = 8,
+            .BLOCK_N = 8,
         };
 
         std::random_device rd;
@@ -205,9 +205,11 @@ void metal_matmul(uint N, uint M, uint K, const std::string& method,
 
 
 int main() {
-    std::string method = "block_tiling";
-    metal_matmul(256, 256, 256, method, 1000, {16, 16}, true);
-    metal_matmul(1024, 1024, 1024, method, 100, {16, 16}, true);
-    metal_matmul(4096, 4096, 4096, method, 10, {16, 16}, false);
-    metal_matmul(8192, 8192, 8192, method, 3, {16, 16}, false);
+    //std::string method = "block_tiling";
+    std::string method = "shared_mem";
+    std::array<int, 2> threads_per_group = {16, 16};
+    metal_matmul(256, 256, 256, method, 1000, threads_per_group, true);
+    metal_matmul(1024, 1024, 1024, method, 100, threads_per_group, true);
+    metal_matmul(4096, 4096, 4096, method, 10, threads_per_group, false);
+    metal_matmul(8192, 8192, 8192, method, 3, threads_per_group, false);
 }
