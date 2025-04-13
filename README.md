@@ -28,6 +28,7 @@ Performance (GFlops)
 |tg mem 16x16     |     81      |      397      |       433     |      434      |  |
 |tg mem unroll    |     96      |      786      |       900     |      906      | unroll 4 |
 |block tiling     |     91      |     1778      |      2533     |     2380      | thread group 16x16, block_k 4, block_n 4 |
+|block tiling     |     91      |     1778      |      2533     |     2380      | |
 
 
 ## Naive
@@ -102,6 +103,8 @@ Adding BK will:
 ## Block tiling
 
 
+### Impl
+
 |Method                    | f32 256x256 | f32 1024x1024 | f32 4096x4096 | f32 8192x8192 |  notes |
 |--------------------------|-------------|---------------|---------------|---------------|--------|
 |tiling BK=1, BN=16, 16x16 |       7     |        80     |       133     |       129     |  |
@@ -126,13 +129,23 @@ Adding BK will:
 
 
 
-
-
 * Threadgroup mem require `2*T*BN*BK*sizeof(float)`
 * Read `2*T^2*K/BK*BK*BN/T` per threadgroup, read `2*K*BN/T` per thread;
 * Compute `2*T^2*K*BN^2` per threadgroup, `2*K*BN^2` per thread
 * Compute / IO: `BN*T`
 * Concurrent threads in a threadgroup: `TGMem / (2*T*BN*BK*sizeof(float)`
+
+### Optimized code
+
+
+|Method                    | f32 256x256 | f32 1024x1024 | f32 4096x4096 | f32 8192x8192 |  notes |
+|--------------------------|-------------|---------------|---------------|---------------|--------|
+|merge duplicated compute  |     100     |      1817     |      2492     |      2389     |  |
+
+
+Surprisingly, moving `ac_ptr`, `bc_ptr` computation out of for-loop will significantly reduce performance.
+
+
 
 
 

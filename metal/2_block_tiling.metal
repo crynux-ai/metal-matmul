@@ -16,38 +16,43 @@ kernel void block_tiling(
     ushort2 tpitg              [[thread_position_in_threadgroup]],
     ushort2 tdim               [[threads_per_threadgroup]]
 ) {
+    float val[BLOCK_N][BLOCK_N] = {0.};
+    uint tx = thread_idx.x * BLOCK_N;
+    uint ty = thread_idx.y * BLOCK_N;
+
+{
     threadgroup float* a_cache = shmem;
     threadgroup float* b_cache = shmem + tdim.x * BLOCK_N * BLOCK_K;
-    float val[BLOCK_N][BLOCK_N] = {0.};
-
-    uint tig_x = tpitg.x * BLOCK_N;
-    uint tig_y = tpitg.y * BLOCK_N;
-    uint tx = thread_idx.x * BLOCK_N; 
-    uint ty = thread_idx.y * BLOCK_N;
+    uint tigx_bk = tpitg.x * BLOCK_N * BLOCK_K;
+    uint tigy_bk = tpitg.y * BLOCK_N * BLOCK_K;
+    uint tx_k = tx * param->K;
+    uint ty_k = ty * param->K;
 
     for (uint i = 0; i < param->K; i+=BLOCK_K) {
         for (uint jy = tpitg.y, jx = tpitg.x; jy < BLOCK_N * BLOCK_K; jy+= tdim.y, jx+=tdim.x) {
-            a_cache[tig_x * BLOCK_K + jy] = A[(tx + jy / BLOCK_K) * param->K + i + jy % BLOCK_K];
-            b_cache[tig_y * BLOCK_K + jx] = B[(ty + jx / BLOCK_K) * param->K + i + jx % BLOCK_K];
+            a_cache[tigx_bk + jy] = A[tx_k + jy / BLOCK_K * param->K + i + jy % BLOCK_K];
+            b_cache[tigy_bk + jx] = B[ty_k + jx / BLOCK_K * param->K + i + jx % BLOCK_K];
         }
 
         threadgroup_barrier(mem_flags::mem_threadgroup);
 
-
         for (uint x = 0; x < BLOCK_N; x++) {
             for (uint y = 0; y < BLOCK_N; y++) {
                 for (uint k = 0; k < BLOCK_K; k++) {
-                    uint ac_ptr = (tig_x + x) * BLOCK_K + k;
-                    uint bc_ptr = (tig_y + y) * BLOCK_K + k;
+                    uint ac_ptr = tigx_bk + x * BLOCK_K + k;
+                    uint bc_ptr = tigy_bk + y * BLOCK_K + k;
                     val[x][y] += a_cache[ac_ptr] * b_cache[bc_ptr];
                 }
             }
         }
         threadgroup_barrier(mem_flags::mem_threadgroup);
     }
+}
+
+    uint tx_m = tx * param->M + ty;
     for (uint x = 0; x < BLOCK_N; x++) {
-        for (uint y = 0; y < BLOCK_N; y++) {
-            uint ptr = (thread_idx.x * BLOCK_N + x) * param->M + thread_idx.y * BLOCK_N + y;
+        uint ptr = tx_m + x * param->M;
+        for (uint y = 0; y < BLOCK_N; y++, ptr++) {
             output[ptr] = val[x][y];
         }
     }
