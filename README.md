@@ -142,9 +142,13 @@ Adding BK will:
 |--------------------------|-------------|---------------|---------------|---------------|--------|
 |merge duplicated compute  |     100     |      1817     |      2492     |      2389     |  |
 |read cache from registry  |     104     |      1833     |      2605     |      2399     |  |
+|unroll 4 on all loop      |      96     |      1725     |      2396     |      2216     |  |
+|unroll 2 on all loop      |      34     |       190     |       199     |       192     |  |
+|unroll 4 on compute loop  |     105     |      1802     |      2600     |      2415     |  |
 
 
 Surprisingly, moving `ac_ptr`, `bc_ptr` computation out of for-loop in the version without registry will significantly reduce performance.
+Unroll will also reduce the performance slightly.
 
 
 

@@ -47,6 +47,7 @@ kernel void block_tiling(
                 b_value[x] = b_cache[bc_ptr];
             }
             for (uint x = 0; x < BLOCK_N; x++) {
+                #pragma unroll(4)
                 for (uint y = 0; y < BLOCK_N; y++) {
                     val[x][y] += a_value[x] * b_value[y];
                 }
