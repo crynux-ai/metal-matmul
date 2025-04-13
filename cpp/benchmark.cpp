@@ -4,6 +4,7 @@
 #include <random>
 #include <algorithm>
 #include <chrono>
+#include <format>
 
 #import <Foundation/Foundation.h>
 #import <Metal/Metal.h>
@@ -13,8 +14,6 @@ struct RunParams {
     uint N;
     uint M;
     uint K;
-    uint BLOCK_N;
-    uint BLOCK_M;
 };
 
 id<MTLComputePipelineState> func_state(id<MTLDevice> device, const std::string& name) {
@@ -51,9 +50,10 @@ void mps(id<MTLCommandBuffer> commandBuffer, id<MTLDevice> device,
     [matmul encodeToCommandBuffer:mpsCommandBuffer leftMatrix:matrixA rightMatrix:matrixB resultMatrix:matrixC];
 }
 
-void naive(id<MTLCommandBuffer> commandBuffer, id<MTLComputePipelineState> state,
+void naive(id<MTLCommandBuffer> commandBuffer, id<MTLDevice> device,
            id<MTLBuffer> bufferParam, id<MTLBuffer> bufferA, id<MTLBuffer> bufferB, id<MTLBuffer> bufferC,
            const RunParams& param, const std::array<int, 2>& threads_per_group) {
+    id<MTLComputePipelineState> state = func_state(device, "naive");
     id<MTLComputeCommandEncoder> computeEncoder = [commandBuffer computeCommandEncoder];
     [computeEncoder setComputePipelineState:state];
     [computeEncoder setBuffer:bufferParam offset:0 atIndex:0];
@@ -67,9 +67,10 @@ void naive(id<MTLCommandBuffer> commandBuffer, id<MTLComputePipelineState> state
 }
 
 void shared_mem(
-        id<MTLCommandBuffer> commandBuffer, id<MTLComputePipelineState> state,
+        id<MTLCommandBuffer> commandBuffer, id<MTLDevice> device,
         id<MTLBuffer> bufferParam, id<MTLBuffer> bufferA, id<MTLBuffer> bufferB, id<MTLBuffer> bufferC,
         const RunParams& param, const std::array<int, 2>& threads_per_group) {
+    id<MTLComputePipelineState> state = func_state(device, "shared_mem_4");
     id<MTLComputeCommandEncoder> computeEncoder = [commandBuffer computeCommandEncoder];
     [computeEncoder setThreadgroupMemoryLength:threads_per_group[0]*threads_per_group[1]*8 atIndex:0];
     [computeEncoder setComputePipelineState:state];
@@ -84,17 +85,23 @@ void shared_mem(
 }
 
 void block_tiling(
-        id<MTLCommandBuffer> commandBuffer, id<MTLComputePipelineState> state,
+        id<MTLCommandBuffer> commandBuffer, id<MTLDevice> device,
         id<MTLBuffer> bufferParam, id<MTLBuffer> bufferA, id<MTLBuffer> bufferB, id<MTLBuffer> bufferC,
         const RunParams& param, const std::array<int, 2>& threads_per_group) {
+    int BLOCK_K = 4;
+    int BLOCK_N = 4;
+    assert(BLOCK_N * BLOCK_K >= threads_per_group[1]);
+    id<MTLComputePipelineState> state = func_state(device, std::format("block_tiling_{}_{}", BLOCK_K, BLOCK_N));
     id<MTLComputeCommandEncoder> computeEncoder = [commandBuffer computeCommandEncoder];
-    [computeEncoder setThreadgroupMemoryLength:8192 atIndex:0];
+    int tg_bytes = 8*threads_per_group[0]*BLOCK_N*BLOCK_K;
+    assert(tg_bytes < device.maxThreadgroupMemoryLength);
+    [computeEncoder setThreadgroupMemoryLength:tg_bytes atIndex:0];
     [computeEncoder setComputePipelineState:state];
     [computeEncoder setBuffer:bufferParam offset:0 atIndex:0];
     [computeEncoder setBuffer:bufferA offset:0 atIndex:1];
     [computeEncoder setBuffer:bufferB offset:0 atIndex:2];
     [computeEncoder setBuffer:bufferC offset:0 atIndex:3];
-    MTLSize gridSize = MTLSizeMake(param.N / param.BLOCK_N, param.M / param.BLOCK_M, 1);
+    MTLSize gridSize = MTLSizeMake(param.N / BLOCK_N, param.M / BLOCK_N, 1);
     MTLSize threadgroupSize = MTLSizeMake(threads_per_group[0], threads_per_group[1], 1);
     [computeEncoder dispatchThreads:gridSize threadsPerThreadgroup:threadgroupSize];
     [computeEncoder endEncoding];
@@ -123,8 +130,6 @@ void metal_matmul(uint N, uint M, uint K, const std::string& method,
             .N = N,
             .M = M,
             .K = K,
-            .BLOCK_M = 8,
-            .BLOCK_N = 8,
         };
 
         std::random_device rd;
@@ -155,11 +160,11 @@ void metal_matmul(uint N, uint M, uint K, const std::string& method,
             if (method == "mps") {
                 mps(commandBuffer, device, bufferA, bufferB, bufferC, N, M, K);
             } else if (method == "naive") {
-                naive(commandBuffer, func_state(device, "naive"), bufferParam, bufferA, bufferB, bufferC, param, threads_per_group);
+                naive(commandBuffer, device, bufferParam, bufferA, bufferB, bufferC, param, threads_per_group);
             } else if (method == "shared_mem") {
-                shared_mem(commandBuffer, func_state(device, "shared_mem_4"), bufferParam, bufferA, bufferB, bufferC, param, threads_per_group);
+                shared_mem(commandBuffer, device, bufferParam, bufferA, bufferB, bufferC, param, threads_per_group);
             } else if (method == "block_tiling") {
-                block_tiling(commandBuffer, func_state(device, "block_tiling"), bufferParam, bufferA, bufferB, bufferC, param, threads_per_group);
+                block_tiling(commandBuffer, device, bufferParam, bufferA, bufferB, bufferC, param, threads_per_group);
             }
 
             [commandBuffer commit];
@@ -205,8 +210,7 @@ void metal_matmul(uint N, uint M, uint K, const std::string& method,
 
 
 int main() {
-    //std::string method = "block_tiling";
-    std::string method = "shared_mem";
+    std::string method = "block_tiling";
     std::array<int, 2> threads_per_group = {16, 16};
     metal_matmul(256, 256, 256, method, 1000, threads_per_group, true);
     metal_matmul(1024, 1024, 1024, method, 100, threads_per_group, true);

@@ -27,7 +27,7 @@ Performance (GFlops)
 |global mem       |    102      |       93      |        90     |       79      |  |
 |tg mem 16x16     |     81      |      397      |       433     |      434      |  |
 |tg mem unroll    |     96      |      786      |       900     |      906      | unroll 4 |
-|block tiling     |     35      |      227      |       253     |      217      | thread group 16x16, block_k 16, block_n/m 4 |
+|block tiling     |     91      |     1778      |      2533     |     2380      | thread group 16x16, block_k 4, block_n 4 |
 
 
 ## Naive
@@ -41,7 +41,17 @@ Different thread group size.
 |naive 8x8        |     79      |      138      |       135     |      141      |  |
 |naive 16x16      |     81      |       93      |        90     |       80      |  |
 
+
+* Read `2*K` per thread, we only consider read from memory.
+* Compute `2*K` per thread, we only consider matmul computation, i.e. the necessary computation without index operation.
+* Compute / IO: `1`
+
 ## Threadgroup memory
+
+By reading data to threadgroup memory, we can:
+* One-time reading from memory to threadgroup
+* Much faster reading from threadgroup to compute
+* Since IO is much slower than compute, we should see improvements when Compute/IO increases.
 
 Load data from memory to threadgroup
 Thread group memory == 32768
@@ -69,6 +79,60 @@ Thread group memory == tdim.x x tdim.y x 8
 |tg mem 16x16 unroll 4   |     99      |       810      |        900     |       903      |  |
 |tg mem 16x16 unroll 8   |     93      |       791      |        866     |       869      |  |
 |tg mem 16x16 unroll 16  |     93      |       703      |        758     |       755      |  |
+
+
+When BK == T:
+* Threadgroup mem require `2*T^2*sizeof(float)`
+* Read `2*T*K` per threadgroup, read `2*K/T` per thread;
+* Compute `2 * T^2 * K` per threadgroup, `2*K` per thread;
+* Compute / IO: `T`
+* Concurrent thread in a threadgroup: `TGMem / (2*T^2 * sizeof(float))`
+
+When BK > T:
+* Threadgroup mem require `2*T*BK * sizeof(float)`
+* Read `2*T^2*K/BK*BK/T` per threadgroup, read `2*K/T` per thread;
+* Compute `2*T^2 * K/BK*BK` per threadgroup, `2*K` per thread;
+* Compute / IO == `T`
+* Concurrent threads in a threadgroup: `TGMem / (2*T*BK *sizeof(float))`
+
+Adding BK will:
+* lower num of concurrent threads by requsting more threadgroup memory
+* no foundamental improvement from Compute/IO.
+
+## Block tiling
+
+
+|Method                    | f32 256x256 | f32 1024x1024 | f32 4096x4096 | f32 8192x8192 |  notes |
+|--------------------------|-------------|---------------|---------------|---------------|--------|
+|tiling BK=1, BN=16, 16x16 |       7     |        80     |       133     |       129     |  |
+|tiling BK=2, BN=8, 16x16  |      67     |      1405     |      1677     |      1591     |  |
+|tiling BK=4, BN=4, 16x16  |      94     |      1741     |      2497     |      2362     |  |
+|tiling BK=4, BN=8, 16x16  |      67     |      1555     |      1937     |      1932     |  |
+|tiling BK=4, BN=16, 16x16 |      14     |       236     |       648     |       582     |  |
+|tiling BK=8, BN=2, 16x16  |      94     |      1377     |      1669     |      1635     |  |
+|tiling BK=8, BN=4, 16x16  |      80     |      1459     |      1818     |      1775     |  |
+|tiling BK=8, BN=8, 16x16  |      53     |      1144     |      1398     |      1371     |  |
+
+|tiling BK=1, BN=8 , 8x8   |      69     |      1041     |      1252     |       626     |  |
+|tiling BK=1, BN=16, 8x8   |       9     |        91     |       115     |      1630     |  |
+|tiling BK=2, BN=4, 8x8    |      85     |      1082     |       717     |       344     |  |
+|tiling BK=2, BN=8, 8x8    |      84     |      1518     |      2076     |       987     |  |
+|tiling BK=4, BN=2, 8x8    |     106     |      1059     |      1143     |       520     |  |
+|tiling BK=4, BN=4, 8x8    |      65     |      1784     |      2083     |       627     |  |
+|tiling BK=4, BN=8, 8x8    |      73     |      1557     |      2334     |      1211     |  |
+|tiling BK=8, BN=2, 8x8    |      96     |      1504     |      1726     |       546     |  |
+|tiling BK=8, BN=4, 8x8    |      88     |      1640     |      2169     |       702     |  |
+|tiling BK=8, BN=8, 8x8    |      61     |      1119     |      1602     |      1387     |  |
+
+
+
+
+
+* Threadgroup mem require `2*T*BN*BK*sizeof(float)`
+* Read `2*T^2*K/BK*BK*BN/T` per threadgroup, read `2*K*BN/T` per thread;
+* Compute `2*T^2*K*BN^2` per threadgroup, `2*K*BN^2` per thread
+* Compute / IO: `BN*T`
+* Concurrent threads in a threadgroup: `TGMem / (2*T*BN*BK*sizeof(float)`
 
 
 

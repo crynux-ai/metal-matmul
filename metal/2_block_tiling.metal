@@ -3,6 +3,7 @@
 
 using namespace metal;
 
+template<ushort BLOCK_K, ushort BLOCK_N>
 kernel void block_tiling(
     constant RunParams *param  [[ buffer(0) ]],
     const device float *A      [[ buffer(1) ]],     // [N, K]
@@ -15,29 +16,26 @@ kernel void block_tiling(
     ushort2 tpitg              [[thread_position_in_threadgroup]],
     ushort2 tdim               [[threads_per_threadgroup]]
 ) {
-    uint BLOCK_K = tdim.y;
     threadgroup float* a_cache = shmem;
-    threadgroup float* b_cache = shmem + tdim.x * param->BLOCK_N * BLOCK_K;
-    float val[32][32] = {0.};
+    threadgroup float* b_cache = shmem + tdim.x * BLOCK_N * BLOCK_K;
+    float val[BLOCK_N][BLOCK_N] = {0.};
 
-    uint tig_x = tpitg.x * param->BLOCK_N;
-    uint tig_y = tpitg.y * param->BLOCK_M;
-    uint tx = thread_idx.x * param->BLOCK_N;
-    uint ty = thread_idx.y * param->BLOCK_M;
+    uint tig_x = tpitg.x * BLOCK_N;
+    uint tig_y = tpitg.y * BLOCK_N;
+    uint tx = thread_idx.x * BLOCK_N; 
+    uint ty = thread_idx.y * BLOCK_N;
 
-    uint istep = param->K / BLOCK_K;
-
-    for (uint i = 0; i < istep; i++) {
-        // Assume tdim.x == tdim.y == BLOCK_K
-        for (uint j = 0; j < param->BLOCK_N; j++) {
-            a_cache[(tig_x + j) * BLOCK_K + tpitg.y] = A[(tx + j) * param->K + i * tdim.y + tpitg.y];
-            b_cache[(tig_y + j) * BLOCK_K + tpitg.x] = B[(ty + j) * param->K + i * tdim.x + tpitg.x];
+    for (uint i = 0; i < param->K; i+=BLOCK_K) {
+        for (uint jy = tpitg.y, jx = tpitg.x; jy < BLOCK_N * BLOCK_K; jy+= tdim.y, jx+=tdim.x) {
+            a_cache[tig_x * BLOCK_K + jy] = A[(tx + jy / BLOCK_K) * param->K + i + jy % BLOCK_K];
+            b_cache[tig_y * BLOCK_K + jx] = B[(ty + jx / BLOCK_K) * param->K + i + jx % BLOCK_K];
         }
+
         threadgroup_barrier(mem_flags::mem_threadgroup);
 
 
-        for (uint x = 0; x < param->BLOCK_N; x++) {
-            for (uint y = 0; y < param->BLOCK_M; y++) {
+        for (uint x = 0; x < BLOCK_N; x++) {
+            for (uint y = 0; y < BLOCK_N; y++) {
                 for (uint k = 0; k < BLOCK_K; k++) {
                     uint ac_ptr = (tig_x + x) * BLOCK_K + k;
                     uint bc_ptr = (tig_y + y) * BLOCK_K + k;
@@ -47,10 +45,29 @@ kernel void block_tiling(
         }
         threadgroup_barrier(mem_flags::mem_threadgroup);
     }
-    for (uint x = 0; x < param->BLOCK_N; x++) {
-        for (uint y = 0; y < param->BLOCK_M; y++) {
-            uint ptr = (thread_idx.x * param->BLOCK_N + x) * param->M + thread_idx.y * param->BLOCK_M + y;
+    for (uint x = 0; x < BLOCK_N; x++) {
+        for (uint y = 0; y < BLOCK_N; y++) {
+            uint ptr = (thread_idx.x * BLOCK_N + x) * param->M + thread_idx.y * BLOCK_N + y;
             output[ptr] = val[x][y];
         }
     }
 }
+
+
+typedef decltype(block_tiling<1, 1>) block_tiling_fn;
+
+template [[host_name("block_tiling_1_4")]] kernel block_tiling_fn block_tiling<1, 4>;
+template [[host_name("block_tiling_1_8")]] kernel block_tiling_fn block_tiling<1, 8>;
+template [[host_name("block_tiling_1_16")]] kernel block_tiling_fn block_tiling<1, 16>;
+template [[host_name("block_tiling_2_4")]] kernel block_tiling_fn block_tiling<2, 4>;
+template [[host_name("block_tiling_2_8")]] kernel block_tiling_fn block_tiling<2, 8>;
+template [[host_name("block_tiling_2_16")]] kernel block_tiling_fn block_tiling<2, 16>;
+template [[host_name("block_tiling_4_2")]] kernel block_tiling_fn block_tiling<4, 2>;
+template [[host_name("block_tiling_4_4")]] kernel block_tiling_fn block_tiling<4, 4>;
+template [[host_name("block_tiling_4_8")]] kernel block_tiling_fn block_tiling<4, 8>;
+template [[host_name("block_tiling_4_16")]] kernel block_tiling_fn block_tiling<4, 16>;
+template [[host_name("block_tiling_8_2")]] kernel block_tiling_fn block_tiling<8, 2>;
+template [[host_name("block_tiling_8_4")]] kernel block_tiling_fn block_tiling<8, 4>;
+template [[host_name("block_tiling_8_8")]] kernel block_tiling_fn block_tiling<8, 8>;
+template [[host_name("block_tiling_8_16")]] kernel block_tiling_fn block_tiling<8, 16>;
+
