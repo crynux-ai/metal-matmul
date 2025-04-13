@@ -141,10 +141,10 @@ Adding BK will:
 |Method                    | f32 256x256 | f32 1024x1024 | f32 4096x4096 | f32 8192x8192 |  notes |
 |--------------------------|-------------|---------------|---------------|---------------|--------|
 |merge duplicated compute  |     100     |      1817     |      2492     |      2389     |  |
+|read cache from registry  |     104     |      1833     |      2605     |      2399     |  |
 
 
-Surprisingly, moving `ac_ptr`, `bc_ptr` computation out of for-loop will significantly reduce performance.
-
+Surprisingly, moving `ac_ptr`, `bc_ptr` computation out of for-loop in the version without registry will significantly reduce performance.
 
 
 

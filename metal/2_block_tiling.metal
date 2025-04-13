@@ -28,6 +28,9 @@ kernel void block_tiling(
     uint tx_k = tx * param->K;
     uint ty_k = ty * param->K;
 
+    float a_value[BLOCK_N];
+    float b_value[BLOCK_N];
+
     for (uint i = 0; i < param->K; i+=BLOCK_K) {
         for (uint jy = tpitg.y, jx = tpitg.x; jy < BLOCK_N * BLOCK_K; jy+= tdim.y, jx+=tdim.x) {
             a_cache[tigx_bk + jy] = A[tx_k + jy / BLOCK_K * param->K + i + jy % BLOCK_K];
@@ -36,12 +39,16 @@ kernel void block_tiling(
 
         threadgroup_barrier(mem_flags::mem_threadgroup);
 
-        for (uint x = 0; x < BLOCK_N; x++) {
-            for (uint y = 0; y < BLOCK_N; y++) {
-                for (uint k = 0; k < BLOCK_K; k++) {
-                    uint ac_ptr = tigx_bk + x * BLOCK_K + k;
-                    uint bc_ptr = tigy_bk + y * BLOCK_K + k;
-                    val[x][y] += a_cache[ac_ptr] * b_cache[bc_ptr];
+        for (uint k = 0; k < BLOCK_K; k++) {
+            uint ac_ptr = tigx_bk + k;
+            uint bc_ptr = tigy_bk + k; 
+            for (uint x = 0; x < BLOCK_N; x++, ac_ptr+=BLOCK_K, bc_ptr+=BLOCK_K) {
+                a_value[x] = a_cache[ac_ptr];
+                b_value[x] = b_cache[bc_ptr];
+            }
+            for (uint x = 0; x < BLOCK_N; x++) {
+                for (uint y = 0; y < BLOCK_N; y++) {
+                    val[x][y] += a_value[x] * b_value[y];
                 }
             }
         }
