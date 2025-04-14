@@ -28,7 +28,8 @@ Performance (GFlops)
 |tg mem 16x16     |     81      |      397      |       433     |      434      |  |
 |tg mem unroll    |     96      |      786      |       900     |      906      | unroll 4 |
 |block tiling     |     91      |     1778      |      2533     |     2380      | thread group 16x16, block_k 4, block_n 4 |
-|block tiling     |     91      |     1778      |      2533     |     2380      | |
+|block tiling     |    105      |     1950      |      2608     |     2409      | |
+|float4x4         |     95      |     2036      |      2961     |     2562      | |
 
 
 ## Naive
@@ -46,6 +47,28 @@ Different thread group size.
 * Read `2*K` per thread, we only consider read from memory.
 * Compute `2*K` per thread, we only consider matmul computation, i.e. the necessary computation without index operation.
 * Compute / IO: `1`
+
+
+### 
+
+```
+# Access A: 150 GFlops
+uint a_ptr = gid.x * param->K;
+for (uint i = 0; i < param->K; i++, a_ptr++) {
+    val += A[a_ptr];
+}
+```
+
+```
+# Access B: 860 GFLops
+uint b_ptr = gid.y * param->K;
+for (uint i = 0; i < param->K; i++, b_ptr++) {
+    val += B[b_ptr];
+}
+```
+
+
+
 
 ## Threadgroup memory
 

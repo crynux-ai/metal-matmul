@@ -107,6 +107,29 @@ void block_tiling(
     [computeEncoder endEncoding];
 }
 
+void float4x4_kernel(
+        id<MTLCommandBuffer> commandBuffer, id<MTLDevice> device,
+        id<MTLBuffer> bufferParam, id<MTLBuffer> bufferA, id<MTLBuffer> bufferB, id<MTLBuffer> bufferC,
+        const RunParams& param, const std::array<int, 2>& threads_per_group) {
+    int BLOCK_K = 4;
+    int BLOCK_N = 4;
+    assert(BLOCK_N * BLOCK_K >= threads_per_group[1]);
+    id<MTLComputePipelineState> state = func_state(device, "float4x4_kernel");
+    id<MTLComputeCommandEncoder> computeEncoder = [commandBuffer computeCommandEncoder];
+    int tg_bytes = 8*threads_per_group[0]*BLOCK_N*BLOCK_K;
+    assert(tg_bytes < device.maxThreadgroupMemoryLength);
+    [computeEncoder setThreadgroupMemoryLength:tg_bytes atIndex:0];
+    [computeEncoder setComputePipelineState:state];
+    [computeEncoder setBuffer:bufferParam offset:0 atIndex:0];
+    [computeEncoder setBuffer:bufferA offset:0 atIndex:1];
+    [computeEncoder setBuffer:bufferB offset:0 atIndex:2];
+    [computeEncoder setBuffer:bufferC offset:0 atIndex:3];
+    MTLSize gridSize = MTLSizeMake(param.N / BLOCK_N, param.M / BLOCK_N, 1);
+    MTLSize threadgroupSize = MTLSizeMake(threads_per_group[0], threads_per_group[1], 1);
+    [computeEncoder dispatchThreads:gridSize threadsPerThreadgroup:threadgroupSize];
+    [computeEncoder endEncoding];
+}
+
 
 void metal_matmul(uint N, uint M, uint K, const std::string& method,
         int repeat=1,
@@ -165,6 +188,8 @@ void metal_matmul(uint N, uint M, uint K, const std::string& method,
                 shared_mem(commandBuffer, device, bufferParam, bufferA, bufferB, bufferC, param, threads_per_group);
             } else if (method == "block_tiling") {
                 block_tiling(commandBuffer, device, bufferParam, bufferA, bufferB, bufferC, param, threads_per_group);
+            } else if (method == "float4x4_kernel") {
+                float4x4_kernel(commandBuffer, device, bufferParam, bufferA, bufferB, bufferC, param, threads_per_group);(commandBuffer, device, bufferParam, bufferA, bufferB, bufferC, param, threads_per_group);
             }
 
             [commandBuffer commit];
@@ -198,7 +223,8 @@ void metal_matmul(uint N, uint M, uint K, const std::string& method,
                     correct++;
                 } else {
                     wrong++;
-                    if (wrong == 0) {
+                    bool print_res = false;
+                    if (print_res && wrong < 1000) {
                         printf("Mistmatch[%d,%d]: %f - %f\n", i, j, val, C[i*M+j]);
                     }
                 }
@@ -210,7 +236,7 @@ void metal_matmul(uint N, uint M, uint K, const std::string& method,
 
 
 int main() {
-    std::string method = "block_tiling";
+    std::string method = "float4x4_kernel";
     std::array<int, 2> threads_per_group = {16, 16};
     metal_matmul(256, 256, 256, method, 1000, threads_per_group, true);
     metal_matmul(1024, 1024, 1024, method, 100, threads_per_group, true);
